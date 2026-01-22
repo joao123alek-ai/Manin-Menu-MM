@@ -1,0 +1,770 @@
+--[[
+    MANIN MENU V11 - NOTIFICATION SYSTEM
+    - Novo: Sistema de Notificações no canto da tela.
+    - Watermark: Agora começa ATIVA por padrão.
+    - Premium: Avisos visuais para todas as ações.
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService") -- Serviço de Animação
+local Workspace = game:GetService("Workspace")
+local Camera = Workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+-- [[ CONFIGURAÇÕES GLOBAIS ]] --
+local Settings = {
+    -- Aimbot
+    AimbotEnabled = false,
+    AimPart = "Head", 
+    FOVRadius = 100,
+    ShowFOV = false,
+    Smoothness = 0,
+    WallCheck = false,
+    CamMode = 1,
+    
+    -- Keybind
+    AimKey = Enum.UserInputType.MouseButton2,
+    AimKeyName = "MouseButton2",
+    
+    -- Visual (ESP)
+    ESPEnabled = false,
+    ESPBox = false,
+    ESPTeam = false, 
+    ESPHealth = false, 
+    ESPDistance = false,
+    ESPDistanceLimit = 2000,
+    
+    -- System
+    ShowWatermark = true  -- AGORA COMEÇA LIGADO
+}
+
+-- Estado Interno
+local Aiming = false
+local LockedTarget = nil 
+local ESP_Store = {}
+
+-- Tema Roxo
+local Theme = {
+    Background = Color3.fromRGB(40, 20, 60),
+    TitleBar = Color3.fromRGB(60, 30, 90),
+    ButtonOn = Color3.fromRGB(120, 60, 180),
+    ButtonOff = Color3.fromRGB(80, 40, 120),
+    TextBox = Color3.fromRGB(30, 15, 45), 
+    Text = Color3.fromRGB(220, 200, 255),
+    TabActive = Color3.fromRGB(140, 80, 200),
+    TabInactive = Color3.fromRGB(60, 30, 90),
+    Notification = Color3.fromRGB(50, 30, 80) -- Cor da notificação
+}
+
+-- [[ CRIAÇÃO DA UI PRINCIPAL ]] --
+local ScreenGui = Instance.new("ScreenGui")
+if game.CoreGui then ScreenGui.Parent = game.CoreGui else ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+ScreenGui.Name = "ManinMenuGUI"
+ScreenGui.ResetOnSpawn = false 
+
+-- [[ SISTEMA DE NOTIFICAÇÃO (NOVO) ]] --
+local NotificationHolder = Instance.new("Frame")
+local UIListLayout = Instance.new("UIListLayout")
+
+NotificationHolder.Name = "Notifications"
+NotificationHolder.Parent = ScreenGui
+NotificationHolder.BackgroundTransparency = 1
+NotificationHolder.Position = UDim2.new(0.82, 0, 0.70, 0) -- Canto inferior direito
+NotificationHolder.Size = UDim2.new(0.17, 0, 0.30, 0)
+NotificationHolder.ClipsDescendants = false
+
+UIListLayout.Parent = NotificationHolder
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+UIListLayout.Padding = UDim.new(0, 5)
+
+function SendNotification(text)
+    -- Cria o frame da notificação
+    local NotifFrame = Instance.new("Frame")
+    local NotifCorner = Instance.new("UICorner")
+    local NotifText = Instance.new("TextLabel")
+    local NotifStroke = Instance.new("UIStroke") -- Borda bonita
+
+    NotifFrame.Parent = NotificationHolder
+    NotifFrame.BackgroundColor3 = Theme.Notification
+    NotifFrame.Size = UDim2.new(1, 0, 0, 0) -- Começa pequeno para animar
+    NotifFrame.BackgroundTransparency = 0.2
+    NotifFrame.BorderSizePixel = 0
+    
+    NotifCorner.Parent = NotifFrame
+    NotifCorner.CornerRadius = UDim.new(0, 6)
+    
+    NotifStroke.Parent = NotifFrame
+    NotifStroke.Color = Theme.ButtonOn
+    NotifStroke.Thickness = 1
+    
+    NotifText.Parent = NotifFrame
+    NotifText.BackgroundTransparency = 1
+    NotifText.Size = UDim2.new(1, 0, 1, 0)
+    NotifText.Position = UDim2.new(0, 10, 0, 0) -- Margem esquerda
+    NotifText.Font = Enum.Font.GothamBold
+    NotifText.Text = text
+    NotifText.TextColor3 = Theme.Text
+    NotifText.TextSize = 14
+    NotifText.TextXAlignment = Enum.TextXAlignment.Left
+    NotifText.TextTransparency = 1 -- Começa invisível
+
+    -- Animação de Entrada
+    local TweenInfoIn = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local TweenSize = TweenService:Create(NotifFrame, TweenInfoIn, {Size = UDim2.new(1, 0, 0, 35)})
+    local TweenText = TweenService:Create(NotifText, TweenInfoIn, {TextTransparency = 0})
+    
+    TweenSize:Play()
+    TweenText:Play()
+
+    -- Tempo para sumir
+    task.spawn(function()
+        wait(2.5) -- Fica na tela por 2.5 segundos
+        local TweenInfoOut = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        local TweenFade = TweenService:Create(NotifFrame, TweenInfoOut, {BackgroundTransparency = 1})
+        local TweenTextFade = TweenService:Create(NotifText, TweenInfoOut, {TextTransparency = 1})
+        local TweenStrokeFade = TweenService:Create(NotifStroke, TweenInfoOut, {Transparency = 1})
+        
+        TweenFade:Play()
+        TweenTextFade:Play()
+        TweenStrokeFade:Play()
+        wait(0.3)
+        NotifFrame:Destroy()
+    end)
+end
+
+-- [[ SISTEMA DE CONFIGURAÇÃO (SAVE/LOAD) ]] --
+local ConfigFileName = "ManinMenu_Config.json"
+
+function SaveConfig()
+    if writefile then
+        local success, err = pcall(function()
+            local SaveData = table.clone(Settings)
+            SaveData.AimKey = nil 
+            local json = HttpService:JSONEncode(SaveData)
+            writefile(ConfigFileName, json)
+        end)
+        if success then 
+            SendNotification("Configuração Salva!") 
+        else 
+            warn("Erro ao salvar:", err) 
+            SendNotification("Erro ao Salvar!")
+        end
+    else
+        SendNotification("Executor não suportado")
+    end
+end
+
+function LoadConfig()
+    if readfile and isfile and isfile(ConfigFileName) then
+        local success, err = pcall(function()
+            local json = readfile(ConfigFileName)
+            local data = HttpService:JSONDecode(json)
+            
+            for k, v in pairs(data) do
+                if Settings[k] ~= nil then
+                    Settings[k] = v
+                end
+            end
+            
+            if Settings.AimKeyName then
+                if Settings.AimKeyName:find("MouseButton") then
+                    if Settings.AimKeyName == "MouseButton1" then Settings.AimKey = Enum.UserInputType.MouseButton1
+                    elseif Settings.AimKeyName == "MouseButton2" then Settings.AimKey = Enum.UserInputType.MouseButton2 end
+                else
+                    local key = Enum.KeyCode[Settings.AimKeyName]
+                    if key then Settings.AimKey = key end
+                end
+            end
+        end)
+        if success then 
+            SendNotification("Configuração Carregada!") 
+        else 
+            SendNotification("Erro ao Carregar!")
+        end
+    end
+end
+
+-- [[ VISUAL DO FOV ]] --
+local Circle = Drawing.new("Circle")
+Circle.Thickness = 1
+Circle.Transparency = 1
+Circle.Color = Color3.fromRGB(255, 255, 255)
+Circle.Filled = false
+Circle.ZIndex = 999
+
+-- [[ FUNÇÕES AUXILIARES ]] --
+local function IsFirstPerson()
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head") then
+        local dist = (Camera.CFrame.Position - LocalPlayer.Character.Head.Position).Magnitude
+        return dist < 1.5 
+    end
+    return false
+end
+
+local function IsVisible(target)
+    if not Settings.WallCheck then return true end
+    if not target.Character:FindFirstChild(Settings.AimPart) then return false end
+
+    local Origin = Camera.CFrame.Position
+    local Destination = target.Character[Settings.AimPart].Position
+    local Direction = Destination - Origin
+    local Params = RaycastParams.new()
+    Params.FilterDescendantsInstances = {LocalPlayer.Character, target.Character}
+    Params.FilterType = Enum.RaycastFilterType.Exclude
+    Params.IgnoreWater = true
+    local Result = Workspace:Raycast(Origin, Direction, Params)
+    return Result == nil 
+end
+
+local function IsTargetValid(target)
+    if not target or not target.Character or not target.Character:FindFirstChild("Humanoid") or not target.Character:FindFirstChild(Settings.AimPart) then
+        return false
+    end
+    if target.Character.Humanoid.Health <= 0 then return false end
+    if Settings.WallCheck and not IsVisible(target) then return false end
+    local pos, onScreen = Camera:WorldToViewportPoint(target.Character[Settings.AimPart].Position)
+    if not onScreen then return false end
+    local mousePos = UserInputService:GetMouseLocation()
+    local distance = (Vector2.new(mousePos.X, mousePos.Y) - Vector2.new(pos.X, pos.Y)).Magnitude
+    if distance > Settings.FOVRadius then return false end
+    return true
+end
+
+-- [[ SISTEMA DE ESP ]] --
+local function CreateESP(player)
+    local Objects = {
+        Box = Drawing.new("Square"),
+        TeamText = Drawing.new("Text"),   
+        InfoText = Drawing.new("Text")    
+    }
+    Objects.Box.Visible = false
+    Objects.Box.Color = Color3.fromRGB(255, 255, 255)
+    Objects.Box.Thickness = 1
+    Objects.Box.Filled = false
+    
+    Objects.TeamText.Visible = false
+    Objects.TeamText.Center = true
+    Objects.TeamText.Outline = true
+    Objects.TeamText.Color = Color3.fromRGB(200, 200, 255)
+    Objects.TeamText.Size = 13
+
+    Objects.InfoText.Visible = false
+    Objects.InfoText.Center = true
+    Objects.InfoText.Outline = true
+    Objects.InfoText.Color = Color3.fromRGB(0, 255, 100)
+    Objects.InfoText.Size = 13
+
+    ESP_Store[player] = Objects
+end
+
+local function RemoveESP(player)
+    if ESP_Store[player] then
+        for _, drawing in pairs(ESP_Store[player]) do
+            drawing:Remove()
+        end
+        ESP_Store[player] = nil
+    end
+end
+
+local function UpdateESP()
+    for player, objects in pairs(ESP_Store) do
+        if not Settings.ESPEnabled then
+            objects.Box.Visible = false
+            objects.TeamText.Visible = false
+            objects.InfoText.Visible = false
+            continue
+        end
+
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+            local RootPart = player.Character.HumanoidRootPart
+            local Head = player.Character:FindFirstChild("Head")
+            
+            local Dist = (LocalPlayer.Character.HumanoidRootPart.Position - RootPart.Position).Magnitude
+            
+            if Dist > Settings.ESPDistanceLimit then
+                objects.Box.Visible = false
+                objects.TeamText.Visible = false
+                objects.InfoText.Visible = false
+                continue
+            end
+            
+            local Vector, OnScreen = Camera:WorldToViewportPoint(RootPart.Position)
+            
+            if OnScreen and Head then
+                local HeadPos = Camera:WorldToViewportPoint(Head.Position + Vector3.new(0, 0.5, 0))
+                local LegPos = Camera:WorldToViewportPoint(RootPart.Position - Vector3.new(0, 3, 0))
+                local Height = LegPos.Y - HeadPos.Y
+                local Width = Height / 2
+
+                if Settings.ESPBox then
+                    objects.Box.Visible = true
+                    objects.Box.Size = Vector2.new(Width, Height)
+                    objects.Box.Position = Vector2.new(Vector.X - Width / 2, HeadPos.Y)
+                else
+                    objects.Box.Visible = false
+                end
+
+                if Settings.ESPTeam then
+                    objects.TeamText.Visible = true
+                    objects.TeamText.Position = Vector2.new(Vector.X, HeadPos.Y - 20) 
+                    local teamName = "No Team"
+                    if player.Team then teamName = player.Team.Name end
+                    objects.TeamText.Text = teamName
+                    if LocalPlayer.Team and player.Team == LocalPlayer.Team then
+                        objects.TeamText.Color = Color3.fromRGB(100, 255, 100)
+                    else
+                        objects.TeamText.Color = Color3.fromRGB(255, 100, 100)
+                    end
+                else
+                    objects.TeamText.Visible = false
+                end
+
+                if Settings.ESPHealth or Settings.ESPDistance then
+                    objects.InfoText.Visible = true
+                    objects.InfoText.Position = Vector2.new(Vector.X, LegPos.Y + 5)
+                    local infoString = ""
+                    if Settings.ESPHealth then
+                        infoString = infoString .. math.floor(player.Character.Humanoid.Health) .. " HP"
+                    end
+                    if Settings.ESPDistance then
+                        if infoString ~= "" then infoString = infoString .. " | " end
+                        infoString = infoString .. math.floor(Dist) .. "m"
+                    end
+                    objects.InfoText.Text = infoString
+                else
+                    objects.InfoText.Visible = false
+                end
+            else
+                objects.Box.Visible = false
+                objects.TeamText.Visible = false
+                objects.InfoText.Visible = false
+            end
+        else
+            objects.Box.Visible = false
+            objects.TeamText.Visible = false
+            objects.InfoText.Visible = false
+        end
+    end
+end
+
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then CreateESP(player) end
+end
+Players.PlayerAdded:Connect(function(player) CreateESP(player) end)
+Players.PlayerRemoving:Connect(function(player) RemoveESP(player) end)
+
+
+-- [[ CRIAÇÃO DA INTERFACE (MENU) ]] --
+local MainFrame = Instance.new("Frame")
+local UICorner = Instance.new("UICorner")
+local Title = Instance.new("TextLabel")
+local TabContainer = Instance.new("Frame")
+local TabAimbotBtn = Instance.new("TextButton")
+local TabVisualBtn = Instance.new("TextButton")
+local TabConfigBtn = Instance.new("TextButton")
+
+local PageAimbot = Instance.new("Frame")
+local PageVisual = Instance.new("Frame")
+local PageConfig = Instance.new("Frame")
+
+-- [[ WATERMARK (ATIVO POR PADRÃO) ]] --
+local WatermarkFrame = Instance.new("Frame")
+local WatermarkText = Instance.new("TextLabel")
+local WatermarkCorner = Instance.new("UICorner")
+
+WatermarkFrame.Name = "Watermark"
+WatermarkFrame.Parent = ScreenGui
+WatermarkFrame.BackgroundColor3 = Theme.Background
+WatermarkFrame.Position = UDim2.new(0.4, 0, 0.02, 0)
+WatermarkFrame.Size = UDim2.new(0, 260, 0, 35)
+WatermarkFrame.Active = true
+WatermarkFrame.Draggable = true 
+WatermarkFrame.Visible = Settings.ShowWatermark -- Usa a configuração global (TRUE)
+
+WatermarkCorner.Parent = WatermarkFrame
+WatermarkCorner.CornerRadius = UDim.new(0, 8)
+
+WatermarkText.Parent = WatermarkFrame
+WatermarkText.BackgroundTransparency = 1
+WatermarkText.Size = UDim2.new(1, 0, 1, 0)
+WatermarkText.Font = Enum.Font.GothamBold
+WatermarkText.Text = "Manin MENU | Loading..."
+WatermarkText.TextColor3 = Theme.Text
+WatermarkText.TextSize = 14
+WatermarkText.TextWrapped = true
+
+
+MainFrame.Name = "ManinMenu"
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Theme.Background
+MainFrame.Position = UDim2.new(0.05, 0, 0.1, 0)
+MainFrame.Size = UDim2.new(0, 320, 0, 520) 
+MainFrame.Active = true
+MainFrame.Draggable = true
+UICorner.Parent = MainFrame
+UICorner.CornerRadius = UDim.new(0, 8)
+
+Title.Parent = MainFrame
+Title.BackgroundColor3 = Theme.TitleBar
+Title.Size = UDim2.new(1, 0, 0, 40)
+Title.Font = Enum.Font.GothamBold
+Title.Text = "Manin MENU"
+Title.TextColor3 = Theme.Text
+Title.TextSize = 18
+Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 8)
+
+TabContainer.Parent = MainFrame
+TabContainer.BackgroundColor3 = Color3.fromRGB(0,0,0)
+TabContainer.BackgroundTransparency = 1
+TabContainer.Position = UDim2.new(0, 0, 0.09, 0)
+TabContainer.Size = UDim2.new(1, 0, 0, 35)
+
+TabAimbotBtn.Parent = TabContainer
+TabAimbotBtn.BackgroundColor3 = Theme.TabActive
+TabAimbotBtn.Size = UDim2.new(0.33, 0, 1, 0)
+TabAimbotBtn.Font = Enum.Font.GothamBold
+TabAimbotBtn.Text = "AIMBOT"
+TabAimbotBtn.TextColor3 = Theme.Text
+TabAimbotBtn.TextSize = 12
+TabAimbotBtn.BorderSizePixel = 0
+
+TabVisualBtn.Parent = TabContainer
+TabVisualBtn.BackgroundColor3 = Theme.TabInactive
+TabVisualBtn.Position = UDim2.new(0.33, 0, 0, 0)
+TabVisualBtn.Size = UDim2.new(0.33, 0, 1, 0)
+TabVisualBtn.Font = Enum.Font.GothamBold
+TabVisualBtn.Text = "VISUAL"
+TabVisualBtn.TextColor3 = Theme.Text
+TabVisualBtn.TextSize = 12
+TabVisualBtn.BorderSizePixel = 0
+
+TabConfigBtn.Parent = TabContainer
+TabConfigBtn.BackgroundColor3 = Theme.TabInactive
+TabConfigBtn.Position = UDim2.new(0.66, 0, 0, 0)
+TabConfigBtn.Size = UDim2.new(0.34, 0, 1, 0)
+TabConfigBtn.Font = Enum.Font.GothamBold
+TabConfigBtn.Text = "CONFIG"
+TabConfigBtn.TextColor3 = Theme.Text
+TabConfigBtn.TextSize = 12
+TabConfigBtn.BorderSizePixel = 0
+
+local function SwitchTab(tab)
+    PageAimbot.Visible = (tab == "Aimbot")
+    PageVisual.Visible = (tab == "Visual")
+    PageConfig.Visible = (tab == "Config")
+    
+    TabAimbotBtn.BackgroundColor3 = (tab == "Aimbot") and Theme.TabActive or Theme.TabInactive
+    TabVisualBtn.BackgroundColor3 = (tab == "Visual") and Theme.TabActive or Theme.TabInactive
+    TabConfigBtn.BackgroundColor3 = (tab == "Config") and Theme.TabActive or Theme.TabInactive
+end
+
+TabAimbotBtn.MouseButton1Click:Connect(function() SwitchTab("Aimbot") end)
+TabVisualBtn.MouseButton1Click:Connect(function() SwitchTab("Visual") end)
+TabConfigBtn.MouseButton1Click:Connect(function() SwitchTab("Config") end)
+
+-- [[ FUNÇÕES UI ]] --
+
+local function CreateToggle(parent, text, yPos, callback, defaultOn)
+    local btn = Instance.new("TextButton")
+    btn.Parent = parent
+    btn.BackgroundColor3 = defaultOn and Theme.ButtonOn or Theme.ButtonOff
+    btn.Position = UDim2.new(0.1, 0, yPos, 0)
+    btn.Size = UDim2.new(0.8, 0, 0, 35)
+    btn.Font = Enum.Font.GothamSemibold
+    btn.Text = text .. (defaultOn and ": ON" or ": OFF")
+    btn.TextColor3 = Theme.Text
+    btn.TextSize = 14
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    
+    btn.MouseButton1Click:Connect(function()
+        local newState = callback()
+        btn.Text = text .. (newState and ": ON" or ": OFF")
+        btn.BackgroundColor3 = newState and Theme.ButtonOn or Theme.ButtonOff
+        
+        -- SISTEMA DE NOTIFICAÇÃO
+        if newState then
+            SendNotification(text .. ": Enabled")
+        else
+            SendNotification(text .. ": Disabled")
+        end
+    end)
+    return btn
+end
+
+-- InputBox
+local function CreateInputBox(parent, text, yPos, default, min, max, callback)
+    local label = Instance.new("TextLabel")
+    label.Parent = parent
+    label.BackgroundTransparency = 1
+    label.Position = UDim2.new(0.1, 0, yPos, 0)
+    label.Size = UDim2.new(0.8, 0, 0, 20)
+    label.Font = Enum.Font.Gotham
+    label.Text = text
+    label.TextColor3 = Theme.Text
+    label.TextSize = 12
+    
+    local box = Instance.new("TextBox")
+    box.Parent = parent
+    box.BackgroundColor3 = Theme.TextBox
+    box.Position = UDim2.new(0.1, 0, yPos + 0.05, 0)
+    box.Size = UDim2.new(0.8, 0, 0, 30)
+    box.Font = Enum.Font.GothamBold
+    box.Text = tostring(default)
+    box.TextColor3 = Theme.Text
+    box.TextSize = 14
+    box.ClearTextOnFocus = false
+    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 6)
+    
+    box.FocusLost:Connect(function()
+        local num = tonumber(box.Text)
+        if num then
+            num = math.clamp(num, min, max)
+            box.Text = tostring(num) 
+            callback(num)
+            SendNotification(text .. " -> " .. num) -- Notificação de mudança de valor
+        else
+            box.Text = tostring(default)
+        end
+    end)
+    return box
+end
+
+-- [[ PÁGINA AIMBOT ]] --
+PageAimbot.Parent = MainFrame
+PageAimbot.BackgroundColor3 = Theme.Background
+PageAimbot.BackgroundTransparency = 1
+PageAimbot.Position = UDim2.new(0, 0, 0.18, 0)
+PageAimbot.Size = UDim2.new(1, 0, 0.82, 0)
+PageAimbot.Visible = true 
+
+CreateToggle(PageAimbot, "Aimbot", 0.02, function() 
+    Settings.AimbotEnabled = not Settings.AimbotEnabled 
+    if not Settings.AimbotEnabled then Aiming = false; LockedTarget = nil end
+    return Settings.AimbotEnabled
+end, false)
+
+CreateToggle(PageAimbot, "Wall Check", 0.11, function() Settings.WallCheck = not Settings.WallCheck; return Settings.WallCheck end, false)
+CreateToggle(PageAimbot, "Show FOV", 0.20, function() Settings.ShowFOV = not Settings.ShowFOV; return Settings.ShowFOV end, false)
+
+local AimPartBtn = Instance.new("TextButton")
+AimPartBtn.Parent = PageAimbot
+AimPartBtn.BackgroundColor3 = Theme.ButtonOn
+AimPartBtn.Position = UDim2.new(0.1, 0, 0.29, 0)
+AimPartBtn.Size = UDim2.new(0.8, 0, 0, 35)
+AimPartBtn.Font = Enum.Font.GothamSemibold
+AimPartBtn.Text = "Aim Part: HEAD"
+AimPartBtn.TextColor3 = Theme.Text
+AimPartBtn.TextSize = 14
+Instance.new("UICorner", AimPartBtn).CornerRadius = UDim.new(0, 6)
+
+AimPartBtn.MouseButton1Click:Connect(function()
+    if Settings.AimPart == "Head" then
+        Settings.AimPart = "HumanoidRootPart"
+        AimPartBtn.Text = "Aim Part: TORSO"
+    else
+        Settings.AimPart = "Head"
+        AimPartBtn.Text = "Aim Part: HEAD"
+    end
+    SendNotification("Mirando em: " .. Settings.AimPart)
+end)
+
+CreateInputBox(PageAimbot, "FOV Radius (10-800)", 0.39, 100, 10, 800, function(v) Settings.FOVRadius = v end)
+CreateInputBox(PageAimbot, "Suavidade (0-50)", 0.52, 0, 0, 50, function(v) Settings.Smoothness = v end)
+
+-- Keybind Manager
+local KeyLabel = Instance.new("TextLabel")
+KeyLabel.Parent = PageAimbot
+KeyLabel.BackgroundTransparency = 1
+KeyLabel.Position = UDim2.new(0.1, 0, 0.65, 0)
+KeyLabel.Size = UDim2.new(0.8, 0, 0, 20)
+KeyLabel.Font = Enum.Font.Gotham
+KeyLabel.Text = "Tecla de Mira"
+KeyLabel.TextColor3 = Theme.Text
+KeyLabel.TextSize = 12
+
+local KeyButton = Instance.new("TextButton")
+KeyButton.Parent = PageAimbot
+KeyButton.BackgroundColor3 = Theme.TextBox
+KeyButton.Position = UDim2.new(0.1, 0, 0.70, 0)
+KeyButton.Size = UDim2.new(0.8, 0, 0, 35)
+KeyButton.Font = Enum.Font.GothamBold
+KeyButton.Text = Settings.AimKeyName
+KeyButton.TextColor3 = Theme.Text
+KeyButton.TextSize = 14
+Instance.new("UICorner", KeyButton).CornerRadius = UDim.new(0, 6)
+
+KeyButton.MouseButton1Click:Connect(function()
+    KeyButton.Text = "Aperte uma tecla..."
+    local Input = UserInputService.InputBegan:Wait()
+    if Input.UserInputType == Enum.UserInputType.Keyboard then
+        Settings.AimKey = Input.KeyCode
+        Settings.AimKeyName = tostring(Input.KeyCode):gsub("Enum.KeyCode.", "")
+    else
+        Settings.AimKey = Input.UserInputType
+        Settings.AimKeyName = tostring(Input.UserInputType):gsub("Enum.UserInputType.", "")
+    end
+    KeyButton.Text = Settings.AimKeyName
+    SendNotification("Keybind: " .. Settings.AimKeyName)
+end)
+
+local CamBtn = Instance.new("TextButton")
+CamBtn.Parent = PageAimbot
+CamBtn.BackgroundColor3 = Theme.ButtonOff
+CamBtn.Position = UDim2.new(0.1, 0, 0.82, 0)
+CamBtn.Size = UDim2.new(0.8, 0, 0, 35)
+CamBtn.Font = Enum.Font.GothamSemibold
+CamBtn.Text = "Ativação: AMBOS"
+CamBtn.TextColor3 = Theme.Text
+CamBtn.TextSize = 13
+Instance.new("UICorner", CamBtn).CornerRadius = UDim.new(0, 6)
+
+CamBtn.MouseButton1Click:Connect(function()
+    Settings.CamMode = Settings.CamMode + 1
+    if Settings.CamMode > 3 then Settings.CamMode = 1 end
+    local txt = "AMBOS"
+    if Settings.CamMode == 2 then txt = "SÓ 1ª PESSOA" elseif Settings.CamMode == 3 then txt = "SÓ 3ª PESSOA" end
+    CamBtn.Text = "Ativação: " .. txt
+    SendNotification("Câmera: " .. txt)
+end)
+
+-- [[ PÁGINA VISUAL ]] --
+PageVisual.Parent = MainFrame
+PageVisual.BackgroundColor3 = Theme.Background
+PageVisual.BackgroundTransparency = 1
+PageVisual.Position = UDim2.new(0, 0, 0.18, 0)
+PageVisual.Size = UDim2.new(1, 0, 0.82, 0)
+PageVisual.Visible = false
+
+CreateToggle(PageVisual, "Ativar ESP (Master)", 0.02, function() Settings.ESPEnabled = not Settings.ESPEnabled; return Settings.ESPEnabled end, false)
+CreateToggle(PageVisual, "Mostrar Box", 0.11, function() Settings.ESPBox = not Settings.ESPBox; return Settings.ESPBox end, false)
+CreateToggle(PageVisual, "Team (Em Cima)", 0.20, function() Settings.ESPTeam = not Settings.ESPTeam; return Settings.ESPTeam end, false)
+CreateToggle(PageVisual, "Vida/HP (Em Baixo)", 0.29, function() Settings.ESPHealth = not Settings.ESPHealth; return Settings.ESPHealth end, false)
+CreateToggle(PageVisual, "Distância (Em Baixo)", 0.38, function() Settings.ESPDistance = not Settings.ESPDistance; return Settings.ESPDistance end, false)
+
+CreateInputBox(PageVisual, "Distância Máxima ESP (100-10000)", 0.50, 2000, 100, 10000, function(v) Settings.ESPDistanceLimit = v end)
+
+
+-- [[ PÁGINA CONFIG ]] --
+PageConfig.Parent = MainFrame
+PageConfig.BackgroundColor3 = Theme.Background
+PageConfig.BackgroundTransparency = 1
+PageConfig.Position = UDim2.new(0, 0, 0.18, 0)
+PageConfig.Size = UDim2.new(1, 0, 0.82, 0)
+PageConfig.Visible = false
+
+CreateToggle(PageConfig, "Watermark", 0.02, function() 
+    Settings.ShowWatermark = not Settings.ShowWatermark
+    WatermarkFrame.Visible = Settings.ShowWatermark
+    return Settings.ShowWatermark 
+end, true) -- BOTÃO MARCADO COMO ON NO MENU PARA SINCROMIZAR
+
+local SaveBtn = Instance.new("TextButton")
+SaveBtn.Parent = PageConfig
+SaveBtn.BackgroundColor3 = Theme.ButtonOn
+SaveBtn.Position = UDim2.new(0.1, 0, 0.20, 0)
+SaveBtn.Size = UDim2.new(0.8, 0, 0, 35)
+SaveBtn.Font = Enum.Font.GothamBold
+SaveBtn.Text = "SALVAR CONFIG"
+SaveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+Instance.new("UICorner", SaveBtn).CornerRadius = UDim.new(0, 6)
+
+SaveBtn.MouseButton1Click:Connect(function()
+    SaveConfig()
+end)
+
+local LoadBtn = Instance.new("TextButton")
+LoadBtn.Parent = PageConfig
+LoadBtn.BackgroundColor3 = Theme.ButtonOn
+LoadBtn.Position = UDim2.new(0.1, 0, 0.30, 0)
+LoadBtn.Size = UDim2.new(0.8, 0, 0, 35)
+LoadBtn.Font = Enum.Font.GothamBold
+LoadBtn.Text = "CARREGAR CONFIG"
+LoadBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+Instance.new("UICorner", LoadBtn).CornerRadius = UDim.new(0, 6)
+
+LoadBtn.MouseButton1Click:Connect(function()
+    LoadConfig()
+    if WatermarkFrame then WatermarkFrame.Visible = Settings.ShowWatermark end
+    KeyButton.Text = Settings.AimKeyName
+end)
+
+
+-- [[ LOOP PRINCIPAL & CONTROLE DE INPUT ]] --
+
+UserInputService.InputBegan:Connect(function(input)
+    if input.UserInputType == Settings.AimKey or input.KeyCode == Settings.AimKey then
+        if Settings.AimbotEnabled then Aiming = true end
+    end
+    if input.KeyCode == Enum.KeyCode.RightShift then MainFrame.Visible = not MainFrame.Visible end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Settings.AimKey or input.KeyCode == Settings.AimKey then
+        Aiming = false
+        LockedTarget = nil
+    end
+end)
+
+function getClosestPlayer()
+    local closestPlayer = nil
+    local shortestDistance = Settings.FOVRadius
+    for _, target in pairs(Players:GetPlayers()) do
+        if target ~= LocalPlayer and IsTargetValid(target) then
+            if target.Character:FindFirstChild(Settings.AimPart) then
+                local pos = Camera:WorldToViewportPoint(target.Character[Settings.AimPart].Position)
+                local mousePos = UserInputService:GetMouseLocation()
+                local distance = (Vector2.new(mousePos.X, mousePos.Y) - Vector2.new(pos.X, pos.Y)).Magnitude
+                if distance < shortestDistance then
+                    shortestDistance = distance
+                    closestPlayer = target
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+RunService.RenderStepped:Connect(function(deltaTime)
+    if Settings.ShowWatermark then
+        local fps = math.floor(1 / deltaTime)
+        local ping = 0
+        pcall(function() ping = math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()) end)
+        WatermarkText.Text = string.format("Manin MENU | FPS: %d | Ping: %d ms", fps, ping)
+    end
+    
+    local MousePos = UserInputService:GetMouseLocation()
+    Circle.Position = Vector2.new(MousePos.X, MousePos.Y)
+    Circle.Radius = Settings.FOVRadius
+    local showFOV = Settings.ShowFOV and Settings.AimbotEnabled
+    if Settings.CamMode == 2 and not IsFirstPerson() then showFOV = false end
+    if Settings.CamMode == 3 and IsFirstPerson() then showFOV = false end
+    Circle.Visible = showFOV
+    
+    UpdateESP()
+
+    if Settings.AimbotEnabled and Aiming then
+        local canAim = true
+        if Settings.CamMode == 2 and not IsFirstPerson() then canAim = false end
+        if Settings.CamMode == 3 and IsFirstPerson() then canAim = false end
+        
+        if canAim then
+            if LockedTarget and not IsTargetValid(LockedTarget) then LockedTarget = nil end
+            if not LockedTarget then LockedTarget = getClosestPlayer() end
+            
+            if LockedTarget and LockedTarget.Character:FindFirstChild(Settings.AimPart) then
+                local TargetPos = LockedTarget.Character[Settings.AimPart].Position
+                local TargetCF = CFrame.new(Camera.CFrame.Position, TargetPos)
+                if Settings.Smoothness == 0 then
+                    Camera.CFrame = TargetCF
+                else
+                    Camera.CFrame = Camera.CFrame:Lerp(TargetCF, 1 / (Settings.Smoothness + 1))
+                end
+            end
+        end
+    end
+end)
